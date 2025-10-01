@@ -8,13 +8,52 @@ import time
 sys.path.append(str(Path(__file__).parent.parent))
 from src.optimizer import Config, CafeMOOptimizer
 
-# Import all model functions
-from run_rf import make_rf, sample_rf
-from run_logreg import make_logreg, sample_logreg
-from run_svm import make_svm, sample_svm
-from run_xgb import make_xgb, sample_xgb
-from run_catboost import make_catboost, sample_catboost
-from run_lgbm import make_lgbm, sample_lgbm
+# Import model functions with error handling for missing dependencies
+available_models = {}
+
+# Always available models (use basic sklearn)
+try:
+    from run_rf import make_rf, sample_rf
+    available_models["RF"] = (make_rf, sample_rf)
+except ImportError as e:
+    print(f"Warning: Could not import Random Forest: {e}")
+
+try:
+    from run_logreg import make_logreg, sample_logreg
+    available_models["LOGREG"] = (make_logreg, sample_logreg)
+except ImportError as e:
+    print(f"Warning: Could not import Logistic Regression: {e}")
+
+try:
+    from run_svm import make_svm, sample_svm
+    available_models["SVM"] = (make_svm, sample_svm)
+except ImportError as e:
+    print(f"Warning: Could not import SVM: {e}")
+
+# Optional models (require additional packages)
+try:
+    from run_xgb import make_xgb, sample_xgb
+    available_models["XGB"] = (make_xgb, sample_xgb)
+except ImportError:
+    print("Info: XGBoost not available (run: pip install xgboost)")
+
+try:
+    from run_catboost import make_catboost, sample_catboost
+    available_models["CATBOOST"] = (make_catboost, sample_catboost)
+except ImportError:
+    print("Info: CatBoost not available (run: pip install catboost)")
+
+try:
+    from run_lgbm import make_lgbm, sample_lgbm
+    available_models["LGBM"] = (make_lgbm, sample_lgbm)
+except ImportError:
+    print("Info: LightGBM not available (run: pip install lightgbm)")
+
+try:
+    from run_gb import make_gb, sample_gb
+    available_models["GB"] = (make_gb, sample_gb)
+except ImportError:
+    print("Info: Gradient Boosting not available")
 
 def main():
     p = argparse.ArgumentParser()
@@ -24,8 +63,8 @@ def main():
     p.add_argument("--tau", type=float, default=0.2)
     p.add_argument("--alpha", type=float, default=0.1)
     p.add_argument("--outdir", default="outputs")
-    p.add_argument("--models", nargs="+", default=["RF", "LOGREG", "SVM", "XGB", "CATBOOST", "LGBM"],
-                   help="Models to run. Choose from: RF, LOGREG, SVM, XGB, CATBOOST, LGBM")
+    p.add_argument("--models", nargs="+", default=list(available_models.keys()),
+                   help=f"Models to run. Available: {list(available_models.keys())}")
     args = p.parse_args()
 
     base = Path("DataSets")
@@ -36,15 +75,8 @@ def main():
         "LAWSCHOOL": base/"LAWSCHOOLADMISSIONS_full.csv",
     }
 
-    # Model configurations
-    model_configs = {
-        "RF": (make_rf, sample_rf),
-        "LOGREG": (make_logreg, sample_logreg),
-        "SVM": (make_svm, sample_svm),
-        "XGB": (make_xgb, sample_xgb),
-        "CATBOOST": (make_catboost, sample_catboost),
-        "LGBM": (make_lgbm, sample_lgbm),
-    }
+    # Use only available model configurations
+    model_configs = available_models
 
     cfg = Config(
         dataset_name=args.dataset,
@@ -57,6 +89,9 @@ def main():
 
     results_summary = []
     
+    print(f"\nAvailable models: {list(available_models.keys())}")
+    print(f"Selected models: {args.models}")
+    
     for model_name in args.models:
         if model_name not in model_configs:
             print(f"Unknown model: {model_name}. Skipping...")
@@ -67,7 +102,9 @@ def main():
         print(f"{'='*50}")
         
         model_fn, sample_fn = model_configs[model_name]
-        out = Path(args.outdir)/(f"{model_name}_{args.dataset}")
+        # Create separate folder for each model
+        model_output_dir = Path(args.outdir)/f"AllModels_{args.dataset}"/model_name
+        out = model_output_dir
         
         start_time = time.time()
         try:
@@ -96,6 +133,7 @@ def main():
                 print(f"Best fairness (DSP): {best_dsp:.4f}")
                 print(f"Best energy: {best_energy:.6f} kWh")
                 print(f"Pareto solutions found: {len(pareto)}")
+                print(f"Results saved to: {out}")
             else:
                 print(f"No Pareto solutions found for {model_name}")
                 
@@ -113,10 +151,12 @@ def main():
                 'Error': str(e)
             })
 
-    # Save comparison results
+    # Save comparison results in the main AllModels folder
     if results_summary:
         comparison_df = pd.DataFrame(results_summary)
-        comparison_path = Path(args.outdir)/f"model_comparison_{args.dataset}.csv"
+        main_output_dir = Path(args.outdir)/f"AllModels_{args.dataset}"
+        main_output_dir.mkdir(parents=True, exist_ok=True)
+        comparison_path = main_output_dir/f"model_comparison_{args.dataset}.csv"
         comparison_df.to_csv(comparison_path, index=False)
         
         print(f"\n{'='*60}")
